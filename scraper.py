@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import logging
@@ -18,7 +19,6 @@ from bs4 import BeautifulSoup, Tag
 
 START_URL = "https://police.byu.edu/police-beat-list"
 MAX_PAGES = 300
-OUTPUT_CSV = Path("police_beat_raw.csv")
 USER_AGENT = "BYU-Police-Beat-Scraper"
 REQUEST_TIMEOUT_SECONDS = 15
 # Keep this nonzero so the scraper is polite, but short enough for local iteration.
@@ -586,24 +586,73 @@ def write_csv(documents: list[dict[str, Any]], output_path: Path) -> None:
         writer.writerows(flatten_for_csv(document) for document in documents)
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Scrape the BYU Police Beat into the MongoDB raw landing zone."
+    )
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=MAX_PAGES,
+        help=f"Maximum list pages to paginate through (default: {MAX_PAGES}).",
+    )
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Also write a flat CSV snapshot of the scraped incidents to PATH.",
+    )
+    parser.add_argument(
+        "--skip-mongo",
+        action="store_true",
+        help="Skip MongoDB entirely (pair with --csv for quick local inspection).",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    args = parse_args(argv)
 
     scraper = PoliceBeatScraper()
-    summaries = scraper.collect_beat_summaries(START_URL, MAX_PAGES)
+    summaries = scraper.collect_beat_summaries(START_URL, args.max_pages)
     logging.info("Collected %s unique beat URLs", len(summaries))
     if not summaries:
-        raise SystemExit("No beat URLs collected; leaving existing CSV untouched.")
+        raise SystemExit("No beat URLs collected; leaving existing data untouched.")
 
-    rows = scraper.scrape_incidents(summaries)
-    if not rows:
-        raise SystemExit("No incident rows parsed; leaving existing CSV untouched.")
+    documents = scraper.scrape_incidents(summaries)
+    if not documents:
+        raise SystemExit("No incidents parsed; leaving existing data untouched.")
+    logging.info("Parsed %s incidents total", len(documents))
 
-    write_csv(rows, OUTPUT_CSV)
-    logging.info("Wrote %s incident rows to %s", len(rows), OUTPUT_CSV)
+    if args.csv:
+        write_csv(documents, args.csv)
+        logging.info("Wrote %s incidents to %s", len(documents), args.csv)
+
+    if args.skip_mongo:
+        logging.info("Skipping MongoDB load (--skip-mongo set)")
+        return
+
+    from dotenv import load_dotenv
+
+    import mongo_store
+
+    load_dotenv()
+    client, collection = mongo_store.connect()
+    try:
+        inserted, skipped = mongo_store.insert_new_incidents(collection, documents)
+    finally:
+        client.close()
+
+    logging.info(
+        "MongoDB load complete: %s new incidents inserted, %s already present",
+        inserted,
+        skipped,
+    )
 
 
 if __name__ == "__main__":

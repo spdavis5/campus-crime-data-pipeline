@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import logging
 import random
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 from urllib.parse import urljoin
 
 import requests
@@ -23,16 +24,25 @@ REQUEST_TIMEOUT_SECONDS = 15
 # Keep this nonzero so the scraper is polite, but short enough for local iteration.
 RATE_LIMIT_SECONDS = (0.25, 0.75)
 
+# Columns for the optional flat CSV snapshot. The MongoDB document carries a few
+# extra fields (null location placeholders, the normalized flag) that only matter
+# downstream, so they are intentionally left out of the quick-look CSV.
 CSV_COLUMNS = [
     "beat_url",
     "beat_title",
     "beat_published_at",
     "date_range_raw",
+    "incident_dates",
     "is_multi_date_beat",
     "incident_type",
     "incident_text",
+    "raw_text_hash",
     "scraped_at",
 ]
+
+# A beat that spans an implausibly long window almost certainly came from a parsing
+# error, so fall back to just the endpoints rather than expanding hundreds of days.
+MAX_BEAT_SPAN_DAYS = 31
 
 DATE_RE = re.compile(r"\d{2}/\d{2}/\d{4}")
 POLICE_BEAT_TITLE_RE = re.compile(
@@ -175,8 +185,8 @@ class PoliceBeatScraper:
 
         return summaries
 
-    def scrape_incidents(self, summaries: Iterable[BeatSummary]) -> list[dict[str, str]]:
-        rows: list[dict[str, str]] = []
+    def scrape_incidents(self, summaries: Iterable[BeatSummary]) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
 
         for summary in summaries:
             logging.info("Fetching beat detail: %s", summary.url)
@@ -192,22 +202,11 @@ class PoliceBeatScraper:
 
             scraped_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
             for incident in incidents:
-                rows.append(
-                    {
-                        "beat_url": summary.url,
-                        "beat_title": summary.title,
-                        "beat_published_at": summary.published_at,
-                        "date_range_raw": summary.date_range_raw,
-                        "is_multi_date_beat": str(summary.is_multi_date_beat).lower(),
-                        "incident_type": incident.incident_type,
-                        "incident_text": incident.incident_text,
-                        "scraped_at": scraped_at,
-                    }
-                )
+                documents.append(build_incident_document(summary, incident, scraped_at))
 
             logging.info("Parsed %s incidents from %s", len(incidents), summary.url)
 
-        return rows
+        return documents
 
 
 def parse_list_page(html: str, page_url: str) -> tuple[list[BeatSummary], str | None]:
@@ -271,6 +270,73 @@ def parse_date_range(title: str) -> tuple[str, bool]:
 
     is_multi_date_beat = len(DATE_RE.findall(date_range_raw)) > 1
     return date_range_raw, is_multi_date_beat
+
+
+def extract_incident_dates(date_range_raw: str) -> list[str]:
+    """Expand a beat's date span into an inclusive list of ISO (YYYY-MM-DD) dates.
+
+    A single-date beat yields one date; a range yields every day from the earliest
+    to the latest date in the title. The source never says which day inside a range
+    an individual incident occurred, so we keep all candidate dates and let the
+    downstream normalization step decide how to attribute them.
+    """
+    parsed: list[date] = []
+    for token in DATE_RE.findall(date_range_raw):
+        try:
+            parsed.append(datetime.strptime(token, "%m/%d/%Y").date())
+        except ValueError:
+            continue
+
+    if not parsed:
+        return []
+
+    start, end = min(parsed), max(parsed)
+    span_days = (end - start).days
+    if span_days > MAX_BEAT_SPAN_DAYS:
+        return [start.isoformat(), end.isoformat()]
+
+    return [(start + timedelta(days=offset)).isoformat() for offset in range(span_days + 1)]
+
+
+def compute_incident_hash(beat_url: str, incident_type: str, incident_text: str) -> str:
+    """Stable SHA-256 identity for one incident, used for incremental dedup.
+
+    We hash the beat URL together with the incident type and text rather than the
+    text alone. Police-beat narratives are terse and repetitive ("Traffic stop. A
+    citation was issued."), so hashing the text by itself would silently collapse
+    genuinely distinct incidents across different beats. Including the beat URL keeps
+    re-scraping the same beat idempotent while preserving real duplicates elsewhere.
+    """
+    payload = "\n".join([beat_url, incident_type, incident_text])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def build_incident_document(
+    summary: BeatSummary, incident: Incident, scraped_at: str
+) -> dict[str, Any]:
+    """Assemble the MongoDB document for a single incident.
+
+    The location_* fields and the normalized flag are placeholders filled by later
+    pipeline stages (LLM classification, then normalization into Postgres).
+    """
+    return {
+        "beat_url": summary.url,
+        "beat_title": summary.title,
+        "beat_published_at": summary.published_at,
+        "date_range_raw": summary.date_range_raw,
+        "incident_dates": extract_incident_dates(summary.date_range_raw),
+        "is_multi_date_beat": summary.is_multi_date_beat,
+        "incident_type": incident.incident_type,
+        "incident_text": incident.incident_text,
+        "raw_text_hash": compute_incident_hash(
+            summary.url, incident.incident_type, incident.incident_text
+        ),
+        "scraped_at": scraped_at,
+        "location_zone": None,
+        "location_confidence": None,
+        "location_reasoning": None,
+        "normalized": False,
+    }
 
 
 def parse_detail_page(html: str) -> list[Incident]:
@@ -497,11 +563,27 @@ def normalize_text(value: str) -> str:
     return WHITESPACE_RE.sub(" ", value.replace("\xa0", " ")).strip()
 
 
-def write_csv(rows: list[dict[str, str]], output_path: Path) -> None:
+def flatten_for_csv(document: dict[str, Any]) -> dict[str, str]:
+    """Project a MongoDB document down to the flat string columns used in the CSV."""
+    return {
+        "beat_url": document["beat_url"],
+        "beat_title": document["beat_title"],
+        "beat_published_at": document["beat_published_at"],
+        "date_range_raw": document["date_range_raw"],
+        "incident_dates": ";".join(document["incident_dates"]),
+        "is_multi_date_beat": str(document["is_multi_date_beat"]).lower(),
+        "incident_type": document["incident_type"],
+        "incident_text": document["incident_text"],
+        "raw_text_hash": document["raw_text_hash"],
+        "scraped_at": document["scraped_at"],
+    }
+
+
+def write_csv(documents: list[dict[str, Any]], output_path: Path) -> None:
     with output_path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=CSV_COLUMNS)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(flatten_for_csv(document) for document in documents)
 
 
 def main() -> None:

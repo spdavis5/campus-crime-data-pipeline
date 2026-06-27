@@ -1,0 +1,9 @@
+.git
+.gitignore
+.agents
+__pycache__
+*.pyc
+.env
+police_beat_raw.csv
+README.md
+Downloads

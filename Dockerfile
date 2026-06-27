@@ -1,0 +1,14 @@
+# Scraper image. The scraper runs as a containerized batch job (eventually triggered
+# by Airflow); it is not run on the host.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies first so they stay cached across code changes.
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY scraper.py mongo_store.py ./
+
+# Arguments (e.g. --max-pages 5) are appended after the entrypoint at run time.
+ENTRYPOINT ["python", "scraper.py"]

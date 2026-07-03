@@ -1,0 +1,39 @@
+# Local data platform. Every service runs in a container; nothing runs on the host.
+# More services (postgres, ollama, airflow, streamlit) will be added as the pipeline
+# grows. For now: the MongoDB raw landing zone and the scraper batch job.
+#
+#   docker compose up -d mongodb                       # start the raw store
+#   docker compose run --rm scraper --max-pages 3      # run a small scrape
+#
+# The scraper is in the "jobs" profile so `docker compose up` does not kick off a
+# full scrape automatically; it is run explicitly on demand.
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: byu-police-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  scraper:
+    build: .
+    image: byu-police-scraper
+    container_name: byu-police-scraper
+    profiles: ["jobs"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: byu_police_beat
+
+volumes:
+  mongo_data:

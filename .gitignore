@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .agents/
 police_beat_raw.csv
+.env

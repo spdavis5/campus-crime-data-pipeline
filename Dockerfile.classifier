@@ -1,0 +1,15 @@
+# Classifier image. Runs the hybrid location classifier as a containerized batch
+# job (eventually triggered by Airflow); it is not run on the host.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies first so they stay cached across code changes.
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY mongo_store.py ./
+COPY classifier/ ./classifier/
+
+# Arguments (e.g. --limit 5, --skip-llm) are appended after the entrypoint at run time.
+ENTRYPOINT ["python", "-m", "classifier"]

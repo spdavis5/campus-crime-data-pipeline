@@ -1,12 +1,16 @@
 # Local data platform. Every service runs in a container; nothing runs on the host.
-# More services (postgres, ollama, airflow, streamlit) will be added as the pipeline
-# grows. For now: the MongoDB raw landing zone and the scraper batch job.
+# More services (postgres, airflow, streamlit) will be added as the pipeline grows.
+# Today: the MongoDB raw landing zone, the scraper, a local Ollama model, and the
+# location classifier.
 #
-#   docker compose up -d mongodb                       # start the raw store
-#   docker compose run --rm scraper --max-pages 3      # run a small scrape
+#   docker compose up -d mongodb ollama              # start the stores + model
+#   docker compose run --rm scraper --max-pages 3    # scrape into the raw store
+#   docker compose run --rm classifier               # classify unclassified incidents
 #
-# The scraper is in the "jobs" profile so `docker compose up` does not kick off a
-# full scrape automatically; it is run explicitly on demand.
+# On first `up`, the ollama-pull sidecar downloads the model into a named volume so
+# the classifier works from a clean checkout. The scraper and classifier are in the
+# "jobs" profile so `docker compose up` starts only the long-running services, not
+# the batch jobs.
 
 services:
   mongodb:
@@ -23,6 +27,35 @@ services:
       timeout: 5s
       retries: 5
 
+  ollama:
+    image: ollama/ollama
+    container_name: byu-police-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # One-shot: pull the model into the ollama volume, then exit. The classifier
+  # waits on this completing so the model is guaranteed present before it runs.
+  ollama-pull:
+    image: ollama/ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    # Share the ollama container's network namespace so the pull talks to it over
+    # localhost — no cross-container DNS to depend on.
+    network_mode: "service:ollama"
+    environment:
+      OLLAMA_HOST: http://localhost:11434
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${OLLAMA_MODEL:-llama3.2:3b}"]
+    restart: "no"
+
   scraper:
     build: .
     image: byu-police-scraper
@@ -35,5 +68,26 @@ services:
       MONGODB_URI: mongodb://mongodb:27017
       MONGO_DB_NAME: byu_police_beat
 
+  classifier:
+    build:
+      context: .
+      dockerfile: Dockerfile.classifier
+    image: byu-police-classifier
+    container_name: byu-police-classifier
+    profiles: ["jobs"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: byu_police_beat
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+
 volumes:
   mongo_data:
+  ollama_data:

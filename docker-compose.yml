@@ -48,8 +48,11 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+    # Share the ollama container's network namespace so the pull talks to it over
+    # localhost — no cross-container DNS to depend on.
+    network_mode: "service:ollama"
     environment:
-      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_HOST: http://localhost:11434
     entrypoint: ["/bin/sh", "-c", "ollama pull ${OLLAMA_MODEL:-llama3.2:3b}"]
     restart: "no"
 

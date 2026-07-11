@@ -1,0 +1,50 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: Date dimension with BYU academic-calendar context.
+    columns:
+      - name: date_day
+        description: Calendar day; primary key.
+        data_tests: [unique, not_null]
+
+  - name: dim_location
+    description: Campus-zone dimension with labels and groupings.
+    columns:
+      - name: location_zone
+        data_tests: [unique, not_null]
+
+  - name: dim_incident_type
+    description: Incident-type dimension with a coarse category.
+    columns:
+      - name: incident_type
+        data_tests: [unique, not_null]
+
+  - name: fct_incidents
+    description: One row per incident, keyed to the date/location/type dimensions.
+    columns:
+      - name: incident_id
+        data_tests: [unique, not_null]
+      - name: location_zone
+        data_tests:
+          - relationships:
+              to: ref('dim_location')
+              field: location_zone
+      - name: incident_type
+        description: Null for the few incidents whose type could not be parsed.
+        data_tests:
+          - relationships:
+              to: ref('dim_incident_type')
+              field: incident_type
+      - name: occurred_date
+        description: Null for incidents whose date could not be parsed from the beat.
+        data_tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_day
+
+  - name: mart_daily_summary
+    description: One row per calendar day with incident counts and calendar flags.
+    columns:
+      - name: date_day
+        data_tests: [unique, not_null]

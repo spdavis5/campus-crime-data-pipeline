@@ -1,0 +1,22 @@
+version: 2
+
+seeds:
+  - name: academic_calendar
+    description: >
+      BYU academic-calendar periods used to enrich dim_date. One row per period
+      with an inclusive [start_date, end_date] range. period_type is one of
+      SEMESTER, FINALS, BREAK, or GAME_DAY (game days are single-day rows).
+
+      PLACEHOLDER DATA: the current rows are approximate and exist only so the
+      models build and types infer correctly. Replace them with the real BYU
+      calendar (semester bounds, finals windows, break weeks, home game days) to
+      make the finals-week / game-day analysis meaningful.
+    columns:
+      - name: period_type
+        data_tests:
+          - accepted_values:
+              values: [SEMESTER, FINALS, BREAK, GAME_DAY]
+      - name: start_date
+        data_tests: [not_null]
+      - name: end_date
+        data_tests: [not_null]

@@ -56,6 +56,24 @@ services:
     entrypoint: ["/bin/sh", "-c", "ollama pull ${OLLAMA_MODEL:-llama3.2:3b}"]
     restart: "no"
 
+  postgres:
+    image: postgres:16
+    container_name: byu-police-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: byu_police_beat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d byu_police_beat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   scraper:
     build: .
     image: byu-police-scraper
@@ -88,6 +106,28 @@ services:
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
 
+  normalizer:
+    build:
+      context: .
+      dockerfile: Dockerfile.normalizer
+    image: byu-police-normalizer
+    container_name: byu-police-normalizer
+    profiles: ["jobs"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: byu_police_beat
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: byu_police_beat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
 volumes:
   mongo_data:
   ollama_data:
+  postgres_data:

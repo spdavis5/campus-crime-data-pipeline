@@ -1,0 +1,17 @@
+# Dashboard image. Long-running Streamlit service that reads the dbt marts from
+# PostgreSQL and serves the campus-safety dashboard on port 8501.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-dashboard.txt ./
+RUN pip install --no-cache-dir -r requirements-dashboard.txt
+
+COPY dashboard/ ./dashboard/
+
+EXPOSE 8501
+
+# Streamlit adds the script's directory to sys.path, so app.py can `import data`.
+ENTRYPOINT ["streamlit", "run", "dashboard/app.py", \
+            "--server.port=8501", "--server.address=0.0.0.0", \
+            "--server.headless=true", "--browser.gatherUsageStats=false"]

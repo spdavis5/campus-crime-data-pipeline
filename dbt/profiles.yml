@@ -1,0 +1,16 @@
+# Connection profile for the campus_safety dbt project. All settings come from the
+# same POSTGRES_* environment variables the rest of the pipeline uses, so this
+# works unchanged on the host and inside the dbt container. Models are built into
+# the "analytics" schema; the raw beats/incidents tables stay in "public".
+campus_safety:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | as_number }}"
+      user: "{{ env_var('POSTGRES_USER', 'postgres') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD', 'postgres') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'byu_police_beat') }}"
+      schema: analytics
+      threads: 4

@@ -1,0 +1,34 @@
+name: "campus_safety"
+version: "1.0.0"
+config-version: 2
+
+# Reads the profile of the same name from profiles.yml (kept inside the project
+# dir; run with --profiles-dir dbt). Connection comes from POSTGRES_* env vars.
+profile: "campus_safety"
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  campus_safety:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    marts:
+      +materialized: table
+
+seeds:
+  campus_safety:
+    academic_calendar:
+      # Force date typing so dim_date's BETWEEN comparisons work even when the
+      # seed is edited by hand.
+      +column_types:
+        start_date: date
+        end_date: date

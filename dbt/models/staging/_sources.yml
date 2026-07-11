@@ -1,0 +1,26 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      The PostgreSQL clean store written by the normalizer. These tables are the
+      relational landing point for classified incidents; dbt models build on top
+      of them without modifying them.
+    schema: public
+    tables:
+      - name: beats
+        description: One row per scraped police-beat page.
+        columns:
+          - name: beat_url
+            description: Canonical URL of the beat page; primary key.
+            data_tests: [unique, not_null]
+      - name: incidents
+        description: One row per incident, keyed by the scrape dedup hash.
+        columns:
+          - name: raw_text_hash
+            description: SHA-256 incident identity; primary key.
+            data_tests: [unique, not_null]
+          - name: location_zone
+            description: Classified campus zone (may be UNKNOWN, never null once classified).
+      - name: incident_dates
+        description: Bridge table of candidate dates for each incident (multi-day beats).

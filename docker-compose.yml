@@ -127,6 +127,23 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
 
+  dbt:
+    build:
+      context: .
+      dockerfile: Dockerfile.dbt
+    image: byu-police-dbt
+    container_name: byu-police-dbt
+    profiles: ["jobs"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: byu_police_beat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
 volumes:
   mongo_data:
   ollama_data:

@@ -12,6 +12,33 @@
 # "jobs" profile so `docker compose up` starts only the long-running services, not
 # the batch jobs.
 
+# Shared config for the Airflow services (webserver, scheduler, init). Runs as
+# root so the mounted Docker socket is accessible for DockerOperator, and points
+# PIPELINE_NETWORK at the compose network so spawned job containers reach the
+# stores by name. All Airflow services are behind the "airflow" profile.
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: byu-police-airflow
+  profiles: ["airflow"]
+  user: "0:0"
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__WEBSERVER__SECRET_KEY: "campus-safety-local"
+    PIPELINE_NETWORK: campus-crime-data-pipeline_default
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - /var/run/docker.sock:/var/run/docker.sock
+  depends_on:
+    airflow-postgres:
+      condition: service_healthy
+
 services:
   mongodb:
     image: mongo:7
@@ -168,7 +195,68 @@ services:
       timeout: 5s
       retries: 5
 
+  # --- Airflow (opt-in: docker compose --profile airflow up -d) ---------------
+  airflow-postgres:
+    image: postgres:16
+    container_name: byu-police-airflow-db
+    profiles: ["airflow"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # One-shot: migrate the metadata DB and create the admin user, then exit.
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create --username admin --password admin \
+          --firstname Admin --lastname User --role Admin \
+          --email admin@example.com || true
+    restart: "no"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: byu-police-airflow-scheduler
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: byu-police-airflow-web
+    command: webserver
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
 volumes:
   mongo_data:
   ollama_data:
   postgres_data:
+  airflow_db_data:

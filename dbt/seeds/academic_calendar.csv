@@ -1,0 +1,6 @@
+period_type,label,start_date,end_date
+SEMESTER,Spring Term 2026,2026-04-27,2026-06-18
+SEMESTER,Summer Term 2026,2026-06-22,2026-08-13
+FINALS,Spring Finals 2026,2026-06-16,2026-06-18
+BREAK,Spring-Summer Gap,2026-06-19,2026-06-21
+GAME_DAY,Example Home Game,2026-09-05,2026-09-05

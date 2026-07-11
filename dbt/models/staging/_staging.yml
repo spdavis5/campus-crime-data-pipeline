@@ -1,0 +1,45 @@
+version: 2
+
+models:
+  - name: stg_incidents
+    description: One cleaned row per incident; incident_id is the scrape dedup hash.
+    columns:
+      - name: incident_id
+        data_tests: [unique, not_null]
+      - name: location_zone
+        description: Classified campus zone.
+        data_tests:
+          - accepted_values:
+              values:
+                - ACADEMIC_CORE
+                - ENGINEERING_NORTH
+                - BUSINESS_SOUTH
+                - STUDENT_SERVICES
+                - STADIUM_AREA
+                - DORMS_HELAMAN
+                - DORMS_HERITAGE
+                - WYVIEW_WYMOUNT
+                - MTC
+                - SERVICE_SUPPORT
+                - OFF_CAMPUS
+                - UNKNOWN
+      - name: beat_url
+        data_tests:
+          - relationships:
+              to: ref('stg_beats')
+              field: beat_url
+
+  - name: stg_beats
+    description: One row per police-beat page.
+    columns:
+      - name: beat_url
+        data_tests: [unique, not_null]
+
+  - name: stg_incident_dates
+    description: Bridge of candidate dates per incident.
+    columns:
+      - name: incident_id
+        data_tests:
+          - relationships:
+              to: ref('stg_incidents')
+              field: incident_id

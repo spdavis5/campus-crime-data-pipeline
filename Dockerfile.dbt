@@ -1,0 +1,16 @@
+# dbt image. Runs the campus_safety dbt project against PostgreSQL as a
+# containerized job (eventually triggered by Airflow). The working directory is
+# the project itself and the profiles dir is set via env, so `docker compose run
+# --rm dbt` runs `dbt build` and `... dbt test` / `... dbt seed` work too.
+FROM python:3.11-slim
+
+RUN pip install --no-cache-dir "dbt-postgres==1.9.0"
+
+WORKDIR /app
+COPY dbt/ ./dbt/
+
+ENV DBT_PROFILES_DIR=/app/dbt
+WORKDIR /app/dbt
+
+ENTRYPOINT ["dbt"]
+CMD ["build"]

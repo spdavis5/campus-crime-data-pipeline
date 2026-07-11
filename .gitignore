@@ -3,3 +3,10 @@ __pycache__/
 .agents/
 police_beat_raw.csv
 .env
+
+# dbt artifacts
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+logs/

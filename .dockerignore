@@ -7,3 +7,7 @@ __pycache__
 police_beat_raw.csv
 README.md
 Downloads
+dbt/target
+dbt/dbt_packages
+dbt/logs
+logs

@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Unit tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest
+
+  dbt-build:
+    name: dbt build + tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: byu_police_beat
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: byu_police_beat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dbt
+        run: pip install "dbt-postgres>=1.7,<2.0"
+      - name: Load source fixtures
+        # dbt's staging models read the public.beats/incidents tables the normalizer
+        # normally writes. In CI we seed a small synthetic fixture so the models
+        # build and every dbt data test runs against real (if tiny) data.
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d byu_police_beat -f ci/fixtures.sql
+      - name: dbt build
+        run: dbt build --project-dir dbt --profiles-dir dbt

@@ -8,12 +8,13 @@ seeds:
       SEMESTER, FINALS, BREAK, or GAME_DAY (single-day rows use the same start
       and end date).
 
-      Populated from BYU's official academic calendar for 2025-2026: semester
+      Populated from BYU's official academic calendar for 2022-2026: semester
       bounds (start of classes -> end of final exams), final-exam windows, and
       breaks (between-term gaps, Thanksgiving/Christmas, and no-class holidays).
-      GAME_DAY is intentionally empty here because the academic calendar carries
-      no athletic schedule; add home football/basketball dates as GAME_DAY rows
-      to enable the game-day analysis.
+      GAME_DAY rows are BYU home football games (2022-2025 seasons, sourced from
+      the published schedules), which drive the game-day analysis; the neutral-site
+      bowl game is excluded. The date coverage spans the full range of scraped
+      incident data so every day carries its academic-calendar context.
     columns:
       - name: period_type
         data_tests:

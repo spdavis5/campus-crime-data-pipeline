@@ -29,7 +29,7 @@ flowchart LR
 
 ## The problem
 
-BYU publishes a daily "Police Beat" — a page of short, free-text incident narratives ("Officers responded to a fire alarm at the HBLL…"). It's human-readable but analytically useless: no structure, no location field, no way to ask *where* on campus incidents cluster or *when* they spike. This pipeline ingests those narratives, extracts a **campus zone** and **date** from each, loads them into a dimensional warehouse, and serves trends by location and academic-calendar context. From **191 incidents** it resolves a campus zone for **67%** with high precision, and surfaces findings like *finals week averages 3.5 incidents/day versus 6.15 on regular days.*
+BYU publishes a daily "Police Beat" — a page of short, free-text incident narratives ("Officers responded to a fire alarm at the HBLL…"). It's human-readable but analytically useless: no structure, no location field, no way to ask *where* on campus incidents cluster or *when* they spike. This pipeline ingests those narratives, extracts a **campus zone** and **date** from each, loads them into a dimensional warehouse, and serves trends by location and academic-calendar context. It has processed **6,454 incidents across roughly four years (2022–2026)**, classifying the majority to a campus zone with high precision, and surfaces findings like *incidents rise during finals week (5.4/day vs 4.1 on regular days) and fall over academic breaks (3.9/day).* *(Metrics as of July 2026; the dataset grows as the pipeline runs.)*
 
 ## Tech stack & why
 
@@ -46,13 +46,13 @@ BYU publishes a daily "Police Beat" — a page of short, free-text incident narr
 
 ## The location classifier (the interesting part)
 
-The hardest problem is that incident text names locations inconsistently ("the HBLL", "Lot 41", "Heritage Halls", "HR #12") — and **57% of reports state no location at all**. The classifier is a **hybrid, deterministic-first** design:
+The hardest problem is that incident text names locations inconsistently ("the HBLL", "Lot 41", "Heritage Halls", "HR #12") — and **a large share of reports state no location at all**. The classifier is a **hybrid, deterministic-first** design:
 
-1. **Deterministic lookup** — an ordered alias table (~80 building names/codes) and a parking-lot→zone map resolve every explicitly named place. High precision, fully reproducible, no model involved. Handles **66%** of incidents.
+1. **Deterministic lookup** — an ordered alias table (~80 building names/codes) and a parking-lot→zone map resolve every explicitly named place. High precision, fully reproducible, no model involved. Resolves **~54%** of incidents on its own.
 2. **Local LLM fallback** — only runs on lookup misses, with a prompt engineered to **abstain** (return `UNKNOWN`) unless it reads an explicit building name.
 3. **Guardrail** — if the model proposes a zone but the text names no proper place, the answer is overridden to `UNKNOWN`. This is what stops the model inventing a location from context.
 
-The result: **67% of incidents get a zone, 33% an honest `UNKNOWN`, and zero fabrications.**
+The result: the deterministic layer locates ~54% of incidents with no model call, the guardrailed LLM fallback lifts fully-classified data toward **~67% located with zero fabrications**, and everything else becomes an honest `UNKNOWN`.
 
 ### How I built this — where the AI was wrong, and how I corrected it
 
@@ -68,6 +68,7 @@ Measuring the full dataset showed the root cause: locations are stated as **expl
 
 - **Unit tests** (`pytest`) cover the classifier's deterministic layer and guardrail with a fake LLM, pinning down specific regressions (Marriott Center ≠ business, `HR #` = Heritage, non-breaking-hyphen normalization, `esc` not matching "rescue", unknown lots not guessed), plus the normalizer's transform logic.
 - **dbt tests** enforce warehouse integrity: `unique`/`not_null` on primary keys, and `relationships` tests tying `fct_incidents` to every dimension.
+- **Source-data defenses**: some beat titles contain typo'd years (e.g. `06/22/2005` for 2025, `20203` for 2023). Rather than corrupt the timeline, the staging layer treats any incident whose date span exceeds a month as a source typo and attributes it to the most recent date in the range — keeping the raw store untouched while the analytical dates stay sane.
 - **CI** (GitHub Actions) runs the full test suite and a `dbt build` against a Postgres service on every push and PR.
 - **Fail-loud connections**: every store (Mongo, Postgres, Ollama) verifies reachability on startup and exits with a clear message rather than hanging.
 
@@ -117,11 +118,12 @@ docker-compose.yml      # every service, one file
 
 ## Results & metrics
 
-- **191 incidents** ingested, deduplicated by content hash.
-- **67% located** to one of 12 campus zones; **33% honest `UNKNOWN`**; **0 fabricated** locations.
-- **66% resolved deterministically** (no model call); the LLM fallback handles the ambiguous tail.
-- **36 dbt nodes** (models + tests) build green.
-- **Finding:** finals week averages **3.5 incidents/day** vs **6.15** on regular class days.
+*As of July 2026; the dataset grows each time the pipeline runs.*
+
+- **6,454 incidents** ingested across ~4 years (**2022–2026**), deduplicated by content hash.
+- **12 campus zones**; the deterministic layer locates **~54%** with no model call, the guardrailed LLM fallback lifts fully-classified data toward **~67%**, and the rest is an honest **`UNKNOWN`** — with **0 fabricated** locations.
+- **36 dbt nodes** (models + tests) build green in CI.
+- **Finding:** across four years, finals week averages **5.4 incidents/day** vs **4.1** on regular class days and **3.9** during breaks — activity rises under finals-week stress and falls when campus empties.
 
 ## Design decisions & trade-offs
 

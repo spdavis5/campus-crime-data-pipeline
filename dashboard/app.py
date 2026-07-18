@@ -100,6 +100,15 @@ if not data.marts_exist(_engine()):
 incidents = _incidents()
 spine = _spine()
 
+# Exclude batch-reporting outlier days: a day with more than 30 incidents is a
+# reporting artifact (a backlog logged onto a single date), not a real spike, so
+# it would distort every daily average. Drop those days from all views.
+OUTLIER_DAY_THRESHOLD = 30
+_day = incidents["date"].dt.normalize()
+_outlier_days = _day.value_counts().loc[lambda c: c > OUTLIER_DAY_THRESHOLD].index
+incidents = incidents[~_day.isin(_outlier_days)]
+spine = spine[~spine["date_day"].isin(_outlier_days)]
+
 # --- sidebar filters (drive every view) --------------------------------------
 with st.sidebar:
     st.markdown("### Filters")
@@ -139,15 +148,11 @@ if f.empty:
 total = len(f)
 dated = f.dropna(subset=["date"])
 days_in_range = max(len(sp), 1)
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3 = st.columns(3)
 c1.metric("Incidents", f"{total:,}")
 c2.metric("Incidents / day", f"{total / days_in_range:.1f}",
           help="Average over the calendar days in the selected range.")
 c3.metric("Campus zones", int(f.loc[~f["zone_unknown"], "zone"].nunique()))
-c4.metric(
-    "Date range",
-    f"{dated['date'].min():%b %Y} – {dated['date'].max():%b %Y}" if not dated.empty else "—",
-)
 
 st.write("")
 overview, patterns, explorer = st.tabs(["Overview", "Patterns", "Explorer"])
@@ -187,7 +192,11 @@ with overview:
         )
     )
     st.altair_chart(_cfg((bars + line).properties(height=300)), use_container_width=True)
-    st.caption("Bars are daily counts colored by academic-calendar day type; the line is a 7-day rolling average.")
+    st.caption(
+        "Bars are daily counts colored by academic-calendar day type; the line is a "
+        "7-day rolling average. Days with more than 30 incidents (batch-reporting "
+        "artifacts) are excluded from all views."
+    )
 
     st.subheader("Average incidents per day, by calendar context")
     effect = (

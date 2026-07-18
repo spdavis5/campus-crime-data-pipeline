@@ -8,6 +8,8 @@ COPY requirements-dashboard.txt ./
 RUN pip install --no-cache-dir -r requirements-dashboard.txt
 
 COPY dashboard/ ./dashboard/
+# Streamlit reads .streamlit/config.toml from the working directory (/app).
+COPY .streamlit/ ./.streamlit/
 
 EXPOSE 8501
 

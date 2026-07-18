@@ -136,17 +136,17 @@ if f.empty:
     st.stop()
 
 # --- headline metrics --------------------------------------------------------
-located = int((~f["zone_unknown"]).sum())
 total = len(f)
 dated = f.dropna(subset=["date"])
+days_in_range = max(len(sp), 1)
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Incidents", f"{total:,}")
-c2.metric("Located to a zone", f"{located / total * 100:.0f}%",
-          help="Share with a known campus zone; the rest state no location.")
+c2.metric("Incidents / day", f"{total / days_in_range:.1f}",
+          help="Average over the calendar days in the selected range.")
 c3.metric("Campus zones", int(f.loc[~f["zone_unknown"], "zone"].nunique()))
 c4.metric(
     "Date range",
-    f"{dated['date'].min():%b %d} – {dated['date'].max():%b %d}" if not dated.empty else "—",
+    f"{dated['date'].min():%b %Y} – {dated['date'].max():%b %Y}" if not dated.empty else "—",
 )
 
 st.write("")
